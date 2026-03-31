@@ -428,6 +428,11 @@
 
 <h3>Bug fixes 🐛</h3>
 
+* Fixed the MLIR `dynamic-one-shot` pass crashing when `qml.sample()` is used with dynamic shots.
+  The pass did not preserve the shots-dimension SSA value of `SampleOp` during function
+  restructuring, causing an `IRMapping` assertion failure.
+  [(#XXXX)](https://github.com/PennyLaneAI/catalyst/pull/XXXX)
+
 * :func:`~pennylane.adjoint` can now be used on subroutines with classical arguments.
   [(#2590)](https://github.com/PennyLaneAI/catalyst/pull/2590)
 

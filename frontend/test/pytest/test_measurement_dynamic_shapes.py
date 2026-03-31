@@ -394,5 +394,35 @@ def test_dynamic_shots_and_wires(capfd):
     assert out.count("compiling...") == 1
 
 
+def test_one_shot_sample_dynamic_shots():
+    """Test that one-shot MCM with dynamic shots and qml.sample works on the capture pipeline.
+
+    This is a regression test for a bug where the SampleOp's dynamic shots
+    operand was a distinct SSA value from deviceInitOp.getShots(), causing an
+    IRMapping assertion failure during the dynamic-one-shot MLIR pass.
+
+    Related: Catalyst #2397, PennyLane #9054
+    """
+
+    dev = qml.device("lightning.qubit", wires=2)
+
+    @catalyst.qjit(capture=True)
+    def workflow(shots):
+        @partial(qml.set_shots, shots=shots)
+        @qml.qnode(dev, mcm_method="one-shot")
+        def circuit():
+            qml.RX(0.5, wires=0)
+            m = qml.measure(0)
+            return qml.sample(wires=[0, 1])
+
+        return circuit()
+
+    result = workflow(10)
+    assert result.shape == (10, 2)
+
+    result = workflow(25)
+    assert result.shape == (25, 2)
+
+
 if __name__ == "__main__":
     pytest.main(["-x", __file__])

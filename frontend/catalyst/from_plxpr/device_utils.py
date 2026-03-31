@@ -133,6 +133,15 @@ def _mcm_preprocessing(
         shots_present = qml.math.is_abstract(shots) or shots != 0
         if not shots_present:
             raise CompileError("Cannot use mcm_method='one-shot' with analytic mode.")
+        # CSE deduplicates tensor.extract ops that PLxPR generates for the same
+        # shots block argument (one for DeviceInitOp, one for SampleOp shape).
+        # Without this, the dynamic-one-shot pass may hit an IRMapping lookup
+        # failure when the duplicate SSA value is erased by clearFuncExcept.
+        pipeline.append(
+            _safe_create_bound_transform(
+                Transform(pass_name="cse"), unsupported_transforms
+            )
+        )
         pipeline.append(
             _safe_create_bound_transform(
                 Transform(pass_name="dynamic-one-shot"), unsupported_transforms
