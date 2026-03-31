@@ -821,3 +821,55 @@ func.func public @test_analytical() {
 //   CHECK: [[res:%.+]]:2 = call @test_generic_with_postprocessing.postprocess([[qres]]) : (f64) -> (f64, f64)
 //   CHECK: return [[res]]#0, [[res]]#1 : f64, f64
 // CHECK: }
+
+
+// -----
+
+
+// Test sample with dynamic shots (shots dimension is dynamic, num_qubits is static).
+// This verifies that the SampleOp's dynamic shots operand is correctly canonicalized
+// to reuse deviceInitOp.getShots() before cloning, so the mapper entry survives
+// clearFuncExcept during the dynamic-one-shot pass.
+func.func public @test_sample_dynamic_shots(%arg0: f64, %shots: i64) -> tensor<?x2xi64> attributes {quantum.node} {
+  quantum.device shots(%shots) ["", "", ""]
+  %0 = quantum.alloc( 2) : !quantum.reg
+  %1 = quantum.extract %0[ 0] : !quantum.reg -> !quantum.bit
+  %out_qubits = quantum.custom "RX"(%arg0) %1 : !quantum.bit
+  %mres, %out_qubit = quantum.measure %out_qubits : i1, !quantum.bit
+  %2 = quantum.insert %0[ 0], %out_qubit : !quantum.reg, !quantum.bit
+  %3 = quantum.compbasis qreg %2 : !quantum.obs
+  %4 = quantum.sample %3 shape %shots : tensor<?x2xf64>
+  %5 = stablehlo.convert %4 : (tensor<?x2xf64>) -> tensor<?x2xi64>
+  quantum.dealloc %2 : !quantum.reg
+  quantum.device_release
+  return %5 : tensor<?x2xi64>
+}
+
+// The one-shot kernel should have shots=1 and static sample shape [1, 2]
+// CHECK: func.func public @test_sample_dynamic_shots.quantum.one_shot_kernel(%arg0: f64, %arg1: i64) -> tensor<1x2xf64> attributes {quantum.node}
+// CHECK:   [[one:%.+]] = arith.constant 1 : i64
+// CHECK:   quantum.device shots([[one]]) ["", "", ""]
+// CHECK:   [[sample:%.+]] = quantum.sample {{%.+}} : tensor<1x2xf64>
+// CHECK:   return [[sample]] : tensor<1x2xf64>
+
+// The quantum function should loop from 0 to %shots with a dynamically-shaped accumulator
+// CHECK: func.func public @test_sample_dynamic_shots.quantum(%arg0: f64, [[shots:%.+]]: i64) -> tensor<?x2xf64> {
+// CHECK:   [[shotsIdx:%.+]] = index.casts [[shots]] : i64 to index
+// CHECK:   [[empty:%.+]] = tensor.empty([[shotsIdx]]) : tensor<?x2xf64>
+// CHECK:   [[lb:%.+]] = arith.constant 0 : index
+// CHECK:   [[step:%.+]] = arith.constant 1 : index
+// CHECK:   [[ub:%.+]] = index.casts [[shots]] : i64 to index
+// CHECK:   [[fullSamples:%.+]] = scf.for %arg2 = [[lb]] to [[ub]] step [[step]] iter_args(%arg3 = [[empty]]) -> (tensor<?x2xf64>) {
+// CHECK:      [[call:%.+]] = func.call @test_sample_dynamic_shots.quantum.one_shot_kernel(%arg0, [[shots]]) : (f64, i64) -> tensor<1x2xf64>
+// CHECK:      [[insert:%.+]] = tensor.insert_slice [[call]] into %arg3[%arg2, 0] [1, 2] [1, 1] : tensor<1x2xf64> into tensor<?x2xf64>
+// CHECK:      scf.yield [[insert]] : tensor<?x2xf64>
+// CHECK:    return [[fullSamples]] : tensor<?x2xf64>
+
+// CHECK:  func.func public @test_sample_dynamic_shots.postprocess(%arg0: f64, %arg1: i64, %arg2: tensor<?x2xf64>) -> tensor<?x2xi64>
+// CHECK:    [[cast:%.+]] = stablehlo.convert %arg2 : (tensor<?x2xf64>) -> tensor<?x2xi64>
+// CHECK:    return [[cast]] : tensor<?x2xi64>
+
+// CHECK:  func.func public @test_sample_dynamic_shots(%arg0: f64, %arg1: i64) -> tensor<?x2xi64>
+// CHECK:    [[quantum_call:%.+]] = call @test_sample_dynamic_shots.quantum(%arg0, %arg1) : (f64, i64) -> tensor<?x2xf64>
+// CHECK:    [[post_process_call:%.+]] = call @test_sample_dynamic_shots.postprocess(%arg0, %arg1, [[quantum_call]]) : (f64, i64, tensor<?x2xf64>) -> tensor<?x2xi64>
+// CHECK:    return [[post_process_call]] : tensor<?x2xi64>

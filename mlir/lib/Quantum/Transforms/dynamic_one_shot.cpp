@@ -1093,6 +1093,17 @@ struct DynamicOneShotPass : public impl::DynamicOneShotPassBase<DynamicOneShotPa
                 continue;
             }
 
+            // PLxPR capture may generate separate tensor.extract ops for the same
+            // function argument, so the SampleOp's shots operand can be a distinct
+            // SSA value from deviceInitOp.getShots(). Canonicalize before cloning
+            // so that clearFuncExcept preserves the mapper entry for it.
+            qKernel.walk([&](quantum::SampleOp op) {
+                auto sh = cast<ShapedType>(op.getSamples().getType()).getShape();
+                if (sh.size() == 2 && ShapedType::isDynamic(sh[0]) &&
+                    op.getDynamicShape()[0] != shots)
+                    op->replaceUsesOfWith(op.getDynamicShape()[0], shots);
+            });
+
             // Clone the qnode function and give it a new name.
             // Because we need to make sure the current qKernel name is reserved as entry point
             // Set the number of shots in the new kernel to one.
