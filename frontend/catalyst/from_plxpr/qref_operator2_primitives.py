@@ -17,6 +17,7 @@ of quantum operations to reference semantics JAXPR.
 """
 
 # pylint: disable=unused-argument
+import numpy as np
 import pennylane as qp
 from jax._src.lib.mlir import ir
 from jax.core import ShapedArray
@@ -40,6 +41,7 @@ from catalyst.decomposition.decomposition_rules import (
 )
 from catalyst.decomposition.graph_op_id import _SPECIAL_LOWERINGS, build_graph_op_id
 from catalyst.decomposition.type_utils import (
+    convert_item_to_mlir_type,
     get_dummy_values_for_arg,
 )
 from catalyst.jax_extras.lowering import get_mlir_attribute_from_pyval
@@ -320,11 +322,10 @@ def compile_decomp_rules(
     elif op_cls is qp.QubitUnitary:
         num_wires = wire_lens[0]
         matrix_size = 2**num_wires
-        dynamic_shape = {
-            qp.QubitUnitary.dynamic_argnames[0]: [
-                f"tensor<{matrix_size}x{matrix_size}xcomplex<f64>>"
-            ]
-        }
+        matrix_type = convert_item_to_mlir_type(
+            ShapedArray((matrix_size, matrix_size), np.complex128)
+        )
+        dynamic_shape = {qp.QubitUnitary.dynamic_argnames[0]: [matrix_type]}
         wire_argname = qp.QubitUnitary.wire_argnames[0]
         op_id = build_graph_op_id("QubitUnitary", dynamic_shape, {wire_argname: wire_lens[0]}, {})
 
