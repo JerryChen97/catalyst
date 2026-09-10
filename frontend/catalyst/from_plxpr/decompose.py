@@ -27,7 +27,7 @@ from typing import get_type_hints
 import jax
 import pennylane as qp
 from pennylane.decomposition import DecompositionGraph
-from pennylane.typing import TensorLike
+from pennylane.typing import AbstractWires, TensorLike
 from pennylane.wires import WiresLike
 
 from catalyst.jax_primitives import decomposition_rule
@@ -99,7 +99,11 @@ COMPILER_OPS_FOR_DECOMPOSITION: dict[str, tuple[int, int]] = {
 def _resource_num_wires(op_rep):
     """Return the wire count from an Operator or Operator2 resource representation."""
     if isinstance(op_rep, qp.core.Operator2):
-        return op_rep.wires.num_wires
+        # SHIM: PL #10032 privatized AbstractWires.num_wires and Wires has no num_wires.
+        wires = op_rep.wires
+        if isinstance(wires, AbstractWires) and not wires.shape_fixed:
+            return None
+        return len(wires)
 
     params = getattr(op_rep, "params", {}) or {}
     return params.get("num_wires")
@@ -251,7 +255,13 @@ class DecompRuleInterpreter(qp.capture.PlxprInterpreter):
                 # to deal with decomposition of symbolic operations at PLxPR.
                 continue
             else:
-                raise ValueError(f"Could not capture {op.op} without the number of wires.")
+                # SHIM(diagnostic): Operator2 templates (e.g. SemiAdder) are lowered via the
+                # Operator2/GraphOpID path, not as compiler-op JAX rules. Warn instead of
+                # raising so compilation can proceed.
+                warnings.warn(
+                    f"[SHIM] Skipping uncapturable decomp-graph op: {op.op}", UserWarning
+                )
+                continue
 
 
 # pylint: disable=too-many-arguments, too-many-positional-arguments
@@ -295,7 +305,8 @@ def _create_decomposition_rule(
                 args.append(jax.ShapeDtypeStruct(arg_spec.shape, arg_spec.dtype))
             elif name in op_rep.wire_args:
                 wire_spec = op_rep.wire_args[name]
-                args.append(qp.math.array([0] * wire_spec.num_wires, like="jax"))
+                # SHIM: PL #10032 privatized AbstractWires.num_wires; len() is the accessor.
+                args.append(qp.math.array([0] * len(wire_spec), like="jax"))
             elif name not in op_rep.compilable_args:
                 raise ValueError(f"Unknown Operator2 argument {name} in decomposition rule {func}.")
             continue
